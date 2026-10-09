@@ -1,0 +1,232 @@
+# Transportation Problem with Automatic Best Algorithm Selection
+
+import numpy as np
+from scipy.optimize import linprog
+
+# 1. Input transportation data
+cost = np.array([
+    [19, 30, 50, 10],
+    [70, 30, 40, 60],
+    [40,  8, 70, 20]
+], dtype=float)
+
+supply = [7, 9, 18]
+demand = [5, 8, 7, 14]
+
+
+# 2. Balance the transportation problem
+def balance_problem(cost, supply, demand):
+    supply = list(supply)
+    demand = list(demand)
+
+    if sum(supply) > sum(demand):
+        cost = np.column_stack(
+            (cost, np.zeros(len(supply)))
+        )
+        demand.append(sum(supply) - sum(demand))
+
+    elif sum(demand) > sum(supply):
+        cost = np.vstack(
+            (cost, np.zeros(len(demand)))
+        )
+        supply.append(sum(demand) - sum(supply))
+
+    return cost, supply, demand
+
+
+# 3. Northwest Corner Method
+def northwest_corner(cost, supply, demand):
+    m, n = cost.shape
+    s, d = supply.copy(), demand.copy()
+    x = np.zeros((m, n))
+    i = j = 0
+
+    while i < m and j < n:
+        q = min(s[i], d[j])
+        x[i, j] = q
+        s[i] -= q
+        d[j] -= q
+
+        if s[i] == 0:
+            i += 1
+        if d[j] == 0:
+            j += 1
+
+    return x
+
+
+# 4. Least Cost Method
+def least_cost(cost, supply, demand):
+    m, n = cost.shape
+    s, d = supply.copy(), demand.copy()
+    x = np.zeros((m, n))
+
+    while sum(s) > 0 and sum(d) > 0:
+        cells = [
+            (cost[i, j], i, j)
+            for i in range(m)
+            for j in range(n)
+            if s[i] > 0 and d[j] > 0
+        ]
+
+        _, i, j = min(cells)
+        q = min(s[i], d[j])
+        x[i, j] = q
+        s[i] -= q
+        d[j] -= q
+
+    return x
+
+
+# 5. Vogel's Approximation Method
+def vogel_method(cost, supply, demand):
+    m, n = cost.shape
+    s, d = supply.copy(), demand.copy()
+    x = np.zeros((m, n))
+
+    while sum(s) > 0 and sum(d) > 0:
+        options = []
+
+        for i in range(m):
+            if s[i] > 0:
+                vals = sorted(
+                    cost[i, j] for j in range(n) if d[j] > 0
+                )
+                penalty = (
+                    vals[1] - vals[0] if len(vals) > 1 else vals[0]
+                )
+                options.append((penalty, 1, i))
+
+        for j in range(n):
+            if d[j] > 0:
+                vals = sorted(
+                    cost[i, j] for i in range(m) if s[i] > 0
+                )
+                penalty = (
+                    vals[1] - vals[0] if len(vals) > 1 else vals[0]
+                )
+                options.append((penalty, 0, j))
+
+        _, is_row, idx = max(options)
+
+        if is_row:
+            i = idx
+            j = min(
+                (j for j in range(n) if d[j] > 0),
+                key=lambda j: cost[i, j]
+            )
+        else:
+            j = idx
+            i = min(
+                (i for i in range(m) if s[i] > 0),
+                key=lambda i: cost[i, j]
+            )
+
+        q = min(s[i], d[j])
+        x[i, j] = q
+        s[i] -= q
+        d[j] -= q
+
+    return x
+
+
+# 6. Calculate transportation cost
+def total_cost(cost, allocation):
+    return float(np.sum(cost * allocation))
+
+
+# 7. Find globally optimal solution
+def optimal_solution(cost, supply, demand):
+    m, n = cost.shape
+    A_eq = []
+    b_eq = []
+
+    for i in range(m):
+        row = np.zeros((m, n))
+        row[i, :] = 1
+        A_eq.append(row.ravel())
+        b_eq.append(supply[i])
+
+    for j in range(n):
+        row = np.zeros((m, n))
+        row[:, j] = 1
+        A_eq.append(row.ravel())
+        b_eq.append(demand[j])
+
+    result = linprog(
+        cost.ravel(),
+        A_eq=np.array(A_eq),
+        b_eq=np.array(b_eq),
+        bounds=(0, None),
+        method="highs"
+    )
+
+    if not result.success:
+        raise ValueError("Optimization failed: " + result.message)
+
+    return result.x.reshape(m, n)
+
+
+# 8. Compare all initial solution algorithms
+cost, supply, demand = balance_problem(cost, supply, demand)
+
+methods = {
+    "Northwest Corner Method": northwest_corner,
+    "Least Cost Method": least_cost,
+    "Vogel's Approximation Method": vogel_method
+}
+
+results = {}
+
+print("\nTRANSPORTATION ALGORITHM COMPARISON")
+print("-" * 55)
+
+for name, method in methods.items():
+    allocation = method(cost, supply, demand)
+    value = total_cost(cost, allocation)
+    results[name] = (value, allocation)
+
+    print(f"\nAlgorithm: {name}")
+    print("Allocation Matrix:")
+    print(allocation.astype(int))
+    print(f"Initial Transportation Cost: {value:.2f}")
+
+
+# 9. Automatically select the best initial algorithm
+minimum_initial_cost = min(v[0] for v in results.values())
+
+best_methods = [
+    name for name, (value, _) in results.items()
+    if np.isclose(value, minimum_initial_cost)
+]
+
+print("\n" + "=" * 55)
+print("AUTOMATIC ALGORITHM SELECTION")
+print("=" * 55)
+
+if len(best_methods) == 1:
+    print("Best Initial Algorithm:", best_methods[0])
+else:
+    print("Tie between:", ", ".join(best_methods))
+
+print(f"Lowest Initial Cost: {minimum_initial_cost:.2f}")
+
+
+# 10. Find and display the globally optimal solution
+optimal = optimal_solution(cost, supply, demand)
+minimum_cost = total_cost(cost, optimal)
+
+print("\n" + "=" * 55)
+print("GLOBALLY OPTIMAL TRANSPORTATION SOLUTION")
+print("=" * 55)
+print("Optimal Allocation Matrix:")
+print(np.round(optimal, 2))
+print(f"Minimum Transportation Cost: {minimum_cost:.2f}")
+
+print("\nInitial vs Optimal Cost")
+for name, (value, _) in results.items():
+    print(f"{name}: {value:.2f} -> {minimum_cost:.2f}")
+
+print("\nRecommendation:")
+print("Use the selected method for the best initial feasible solution.")
+print("Use the optimal allocation above for minimum transportation cost.")
